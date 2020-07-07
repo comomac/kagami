@@ -25,8 +25,10 @@ var (
 	reFileExtPNG = regexp.MustCompile("(?i)\\.png$")
 )
 
+// constants
 const (
-	chExit = ":exit:"
+	chExit  = ":exit:"
+	RPCPort = "4122"
 )
 
 func fileInode(file string) (uint64, error) {

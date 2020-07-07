@@ -280,7 +280,7 @@ func imageSave(out string, img image.Image) error {
 	return nil
 }
 
-func basicResizeBench(img image.Image) {
+func basicResizeBench(img image.Image) error {
 	resizeMethods := []draw.Interpolator{
 		draw.NearestNeighbor,
 		draw.ApproxBiLinear,
@@ -291,16 +291,17 @@ func basicResizeBench(img image.Image) {
 		tp := time.Now()
 		img2, err := imageResize(img, resizeMethod)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		log.Printf("scaling using %d takes %v time",
 			i, time.Now().Sub(tp))
 
 		err = imageSave(fmt.Sprintf("out-%d.png", i), img2)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 	}
+	return nil
 }
 
 func imagePHashFile(file string) (uint64, error) {

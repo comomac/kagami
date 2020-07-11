@@ -252,10 +252,14 @@ func ListDirByQueue(dir string) error {
 		sort.Slice(zs, func(i, j int) bool {
 			return zs[i].Name < zs[j].Name
 		})
+		// save phash record
+		txt := "# kagami_imgsum_ver: 1\n" + "# file: " + file + "\n"
 		for _, zz := range zs {
 			line := fmt.Sprintf("%08X %9d %04d %04d %016X %s", zz.CRC32, zz.DataSize, zz.Width, zz.Height, zz.PHash, zz.Name)
 			fmt.Println(line)
+			txt += line + "\n"
 		}
+		saveText(inoFile, txt)
 		q.mux.Unlock()
 
 		return nil

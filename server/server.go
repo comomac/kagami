@@ -12,12 +12,31 @@ import (
 )
 
 // Listener RPC interface
-type Listener int
+type Listener struct {
+	Queue *core.Queue
+}
 
 // GetLine test code for RPC
 func (l *Listener) GetLine(line []byte, ack *int) error {
 	fmt.Println(string(line))
 	*ack = 123
+	return nil
+}
+
+// GetZipImage get the next ZipImage data for RPC
+func (l *Listener) GetZipImage(n int, ack *core.ZipImage) error {
+	zi := l.Queue.GetNext()
+	if zi != nil {
+		*ack = *zi
+	}
+	return nil
+}
+
+// SetZipImage set the ZipImage data for RPC
+func (l *Listener) SetZipImage(zImg core.ZipImage, ack *int) error {
+	fmt.Printf("set! %d %X\n", zImg.Nth, zImg.PHash)
+	l.Queue.Set(zImg.Nth, &zImg)
+	*ack = 1
 	return nil
 }
 
@@ -36,9 +55,12 @@ func Serve(listenIP, dir string) error {
 		return err
 	}
 
-	// core.ListDir(dir)
+	q := core.Queue{}
+	go core.ListDirByQueue(dir, &q, true)
 
-	addy, err := net.ResolveTCPAddr("tcp", listenIP+":"+core.RPCPort)
+	listen := listenIP + ":" + core.RPCPort
+	fmt.Println("listening", listen)
+	addy, err := net.ResolveTCPAddr("tcp", listen)
 	if err != nil {
 		return err
 	}
@@ -49,6 +71,7 @@ func Serve(listenIP, dir string) error {
 	}
 
 	listener := new(Listener)
+	listener.Queue = &q
 	rpc.Register(listener)
 	rpc.Accept(inbound)
 

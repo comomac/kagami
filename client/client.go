@@ -1,10 +1,9 @@
 package client
 
 import (
-	"bufio"
 	"fmt"
 	"net/rpc"
-	"os"
+	"time"
 
 	"github.com/comomac/kagami/core"
 )
@@ -17,18 +16,55 @@ func Connect(serverIP string) error {
 		return err
 	}
 
-	in := bufio.NewReader(os.Stdin)
+	// in := bufio.NewReader(os.Stdin)
 	for {
-		line, _, err := in.ReadLine()
+		// line, _, err := in.ReadLine()
+		// if err != nil {
+		// 	return err
+		// }
+		// var reply int
+		// err = client.Call("Listener.GetLine", line, &reply)
+		// if err != nil {
+		// 	return err
+		// }
+		// fmt.Println("reply", reply)
+
+		// line, _, err := in.ReadLine()
+		// if err != nil {
+		// 	return err
+		// }
+		// n, err := strconv.Atoi(string(line))
+		// if err != nil {
+		// 	return err
+		// }
+
+		var zipImg core.ZipImage
+		err = client.Call("Listener.GetZipImage", 0, &zipImg)
 		if err != nil {
 			return err
 		}
+
+		if zipImg.Inode == 0 {
+			time.Sleep(time.Second)
+			continue
+		}
+
+		fmt.Println("zipImg", zipImg.DataSize)
+
 		var reply int
-		err = client.Call("Listener.GetLine", line, &reply)
+		pHash, w, h, err := core.ProcessImage(zipImg.Data)
+		if err != nil {
+			zipImg.Error = true
+		} else {
+			zipImg.Parsed = true
+			zipImg.PHash = pHash
+			zipImg.Width = w
+			zipImg.Height = h
+		}
+		err = client.Call("Listener.SetZipImage", zipImg, &reply)
 		if err != nil {
 			return err
 		}
-		fmt.Println("reply", reply)
 	}
 
 	return nil

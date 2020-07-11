@@ -38,7 +38,8 @@ func main() {
 		// core.ListDir(*dirPtr)
 
 		// list by images
-		core.ListDirByQueue(*dirPtr)
+		q := core.Queue{}
+		core.ListDirByQueue(*dirPtr, &q, false)
 
 	} else if *modeServer != "" {
 		// server mode

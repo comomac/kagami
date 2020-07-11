@@ -130,16 +130,57 @@ type Queue struct {
 	fin  bool              // finish (all zips) flag
 }
 
+// GetNext next ZipImage
+func (q *Queue) GetNext() *ZipImage {
+	q.mux.Lock()
+	zi := q.zs[q.cur]
+	q.cur++
+	q.mux.Unlock()
+	return zi
+}
+
+// Get nth ZipImage
+func (q *Queue) Get(n int) *ZipImage {
+	q.mux.Lock()
+	zi := q.zs[n]
+	q.mux.Unlock()
+	return zi
+}
+
+// Set nth ZipImage
+func (q *Queue) Set(n int, in *ZipImage) error {
+	zi := q.Get(n)
+	if zi == nil {
+		return fmt.Errorf("nth ZipImage not exist (%d)", n)
+	}
+
+	q.mux.Lock()
+	zipImg := q.zs[n]
+
+	if in.Error == true {
+		zipImg.Error = true
+	} else {
+		zipImg.Parsed = true
+		zipImg.PHash = in.PHash
+		zipImg.Width = in.Width
+		zipImg.Height = in.Height
+	}
+	q.ds[n] = true
+	q.mux.Unlock()
+
+	return nil
+}
+
 // ListDirByQueue recursively list directory looking for cbz and queue jobs by images
-func ListDirByQueue(dir string) error {
+func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 	fmt.Println("listing dir by images", dir)
 
-	q := Queue{}
-
-	// start multi-threading
-	cpus := runtime.NumCPU()
-	for i := 0; i < cpus; i++ {
-		go startThreadByQueue(i, &q)
+	if !serverMode {
+		// start multi-threading
+		cpus := runtime.NumCPU()
+		for i := 0; i < cpus; i++ {
+			go startThreadByQueue(i, q)
+		}
 	}
 
 	err := filepath.Walk(dir, func(file string, info os.FileInfo, err error) error {
@@ -224,17 +265,16 @@ func ListDirByQueue(dir string) error {
 		// check if zip file is processed
 	FCheck:
 		for {
-			q.mux.Lock()
-			ds := q.ds
-			len := q.len
-			q.mux.Unlock()
-
 			i := 0
-			for _, b := range ds {
+
+			q.mux.Lock()
+			len := q.len
+			for _, b := range q.ds {
 				if b {
 					i++
 				}
 			}
+			q.mux.Unlock()
 
 			if i >= len-1 {
 				break FCheck
@@ -336,9 +376,8 @@ func unzipImageInfo(f *zip.File) (uint64, int, int, error) {
 	return hsh, rect.X, rect.Y, nil
 }
 
-// pImageInfo process phash from image bytes.
-// phash, w, h
-func pImageInfo(dat []byte) (uint64, int, int, error) {
+// ProcessImage produce image phash, width, height
+func ProcessImage(dat []byte) (uint64, int, int, error) {
 	r := bytes.NewReader(dat)
 
 	img, _, err := image.Decode(r)
@@ -431,13 +470,13 @@ func startThreadByQueue(cpu int, q *Queue) {
 		q.cur++
 		q.mux.Unlock()
 
-		phash, w, h, err := pImageInfo(zipImg.Data)
+		pHash, w, h, err := ProcessImage(zipImg.Data)
 		q.mux.Lock()
 		if err != nil {
 			zipImg.Error = true
 		} else {
 			zipImg.Parsed = true
-			zipImg.PHash = phash
+			zipImg.PHash = pHash
 			zipImg.Width = w
 			zipImg.Height = h
 		}

@@ -19,8 +19,6 @@ func main() {
 
 	flag.Parse()
 
-	fmt.Println("111", *modeServer, "222", *modeClient)
-
 	if *modeServer == "" && *modeClient == "" {
 		// local mode
 		fmt.Println("mode: local")
@@ -36,7 +34,11 @@ func main() {
 			log.Fatal(err)
 		}
 
-		core.ListDir(*dirPtr)
+		// list by files
+		// core.ListDir(*dirPtr)
+
+		// list by images
+		core.ListDirByQueue(*dirPtr)
 
 	} else if *modeServer != "" {
 		// server mode

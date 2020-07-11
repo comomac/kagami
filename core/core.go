@@ -2,15 +2,18 @@ package core
 
 import (
 	"archive/zip"
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,9 +23,10 @@ import (
 )
 
 var (
-	reFileExtCBZ = regexp.MustCompile("(?i)\\.cbz$")
-	reFileExtJPG = regexp.MustCompile("(?i)\\.jp(e|)g$")
-	reFileExtPNG = regexp.MustCompile("(?i)\\.png$")
+	reFileExtCBZ *regexp.Regexp = regexp.MustCompile("(?i)\\.cbz$")
+	reFileExtJPG *regexp.Regexp = regexp.MustCompile("(?i)\\.jp(e|)g$")
+	reFileExtPNG *regexp.Regexp = regexp.MustCompile("(?i)\\.png$")
+	sleepTime    time.Duration  = time.Millisecond * 300
 )
 
 // constants
@@ -114,6 +118,159 @@ func ListDir(dir string) error {
 	return nil
 }
 
+// Queue for images in a zip file
+type Queue struct {
+	name string            // zip file name
+	ino  uint64            // zip file inode
+	zs   map[int]*ZipImage // in-memory image data
+	ds   map[int]bool      // 1:1 map to zs, marking ZipImage as done (regardless of success or failure)
+	cur  int               // cursor, last image nth
+	len  int               // queue length
+	mux  sync.Mutex        // read/write control flag
+	fin  bool              // finish (all zips) flag
+}
+
+// ListDirByQueue recursively list directory looking for cbz and queue jobs by images
+func ListDirByQueue(dir string) error {
+	fmt.Println("listing dir by images", dir)
+
+	q := Queue{}
+
+	// start multi-threading
+	cpus := runtime.NumCPU()
+	for i := 0; i < cpus; i++ {
+		go startThreadByQueue(i, &q)
+	}
+
+	err := filepath.Walk(dir, func(file string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !reFileExtCBZ.MatchString(info.Name()) {
+			return nil
+		}
+
+		// zip file inode
+		ino, err := fileInode(file)
+		if err != nil {
+			return err
+		}
+		// inode info file
+		inoFile := fmt.Sprintf("store/%d.txt", ino)
+
+		fi := fileInfo(inoFile)
+		if fi != nil && !fi.IsDir() && fi.Size() > 100 {
+			if fi.ModTime().AddDate(0, 0, 7).After(time.Now()) {
+				fmt.Println("prev scanned", file)
+				return nil
+			}
+		}
+
+		// -- producer --
+		r, err := zip.OpenReader(file)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+
+		q.mux.Lock()
+		q.ino = ino
+		q.name = file
+		q.cur = 0
+		q.zs = map[int]*ZipImage{}
+		q.ds = map[int]bool{}
+		q.mux.Unlock()
+
+		rtotal := 0
+		for _, f := range r.File {
+			if !reFileExtJPG.MatchString(f.Name) && !reFileExtPNG.MatchString(f.Name) {
+				continue
+			}
+
+			fp, err := f.Open()
+			if err != nil {
+				return err
+			}
+			fdat, err := ioutil.ReadAll(fp)
+			if err != nil {
+				return err
+			}
+
+			// add queue
+			q.mux.Lock()
+			q.zs[rtotal] = &ZipImage{
+				MTime:    info.ModTime(),
+				Name:     f.Name,
+				Inode:    ino,
+				Nth:      rtotal,
+				CRC32:    f.CRC32,
+				Data:     fdat,
+				DataSize: f.UncompressedSize64,
+			}
+			q.ds[rtotal] = false
+			q.mux.Unlock()
+
+			rtotal++
+		}
+		q.mux.Lock()
+		q.len = rtotal
+		q.mux.Unlock()
+		// -- /producer --
+
+		// blocking
+		// check if zip file is processed
+	FCheck:
+		for {
+			q.mux.Lock()
+			ds := q.ds
+			len := q.len
+			q.mux.Unlock()
+
+			i := 0
+			for _, b := range ds {
+				if b {
+					i++
+				}
+			}
+
+			if i >= len-1 {
+				break FCheck
+			}
+			time.Sleep(sleepTime)
+		}
+
+		// print zip images result
+		q.mux.Lock()
+		zs := []*ZipImage{}
+		for _, zz := range q.zs {
+			zs = append(zs, zz)
+		}
+		// sort by filename
+		sort.Slice(zs, func(i, j int) bool {
+			return zs[i].Name < zs[j].Name
+		})
+		for _, zz := range zs {
+			line := fmt.Sprintf("%08X %9d %04d %04d %016X %s", zz.CRC32, zz.DataSize, zz.Width, zz.Height, zz.PHash, zz.Name)
+			fmt.Println(line)
+		}
+		q.mux.Unlock()
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	q.mux.Lock()
+	q.fin = true
+	q.mux.Unlock()
+
+	return nil
+}
+
 func listZip(file string) (string, error) {
 	ino, err := fileInode(file)
 	if err != nil {
@@ -146,6 +303,7 @@ func listZip(file string) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
+// unzipImageInfo create phash from zip.File.
 // phash, w, h
 func unzipImageInfo(f *zip.File) (uint64, int, int, error) {
 	if !reFileExtJPG.MatchString(f.Name) && !reFileExtPNG.MatchString(f.Name) {
@@ -174,6 +332,30 @@ func unzipImageInfo(f *zip.File) (uint64, int, int, error) {
 	return hsh, rect.X, rect.Y, nil
 }
 
+// pImageInfo process phash from image bytes.
+// phash, w, h
+func pImageInfo(dat []byte) (uint64, int, int, error) {
+	r := bytes.NewReader(dat)
+
+	img, _, err := image.Decode(r)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	img2, err := imageResize(img, draw.BiLinear)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	hsh, err := imagePHash(img2)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	rect := img.Bounds().Max
+
+	return hsh, rect.X, rect.Y, nil
+}
+
+// scan base on zip file
 func startThread(cpu int, ch <-chan string, wg *sync.WaitGroup) {
 Loop:
 	for {
@@ -198,6 +380,68 @@ Loop:
 		}
 	}
 	wg.Done()
+}
+
+// ZipImage individual image file detail from zip file
+type ZipImage struct {
+	MTime    time.Time // zip file modified time
+	Inode    uint64    // zip file inode
+	Nth      int       // image file order in zip
+	CRC32    uint32    // image data crc32
+	Name     string    // image file path+name
+	Data     []byte    // image data
+	DataSize uint64    // image data size
+	Parsed   bool      // is image phashed
+	Error    bool      // is error
+	PHash    uint64    // image phash
+	Width    int       // image width
+	Height   int       // image height
+}
+
+// scan base on image data
+func startThreadByQueue(cpu int, q *Queue) {
+	fmt.Println("starting thread", cpu)
+
+	for {
+		if q.cur >= q.len {
+			// todo wait until all others are finished
+
+			if q.fin {
+				// everything is done
+				break
+			}
+
+			time.Sleep(sleepTime)
+			continue
+		}
+
+		zipImg := q.zs[q.cur]
+		if zipImg == nil {
+			// not ready yet
+			time.Sleep(sleepTime)
+			continue
+		}
+
+		q.mux.Lock()
+		cursor := q.cur
+		q.cur++
+		q.mux.Unlock()
+
+		phash, w, h, err := pImageInfo(zipImg.Data)
+		q.mux.Lock()
+		if err != nil {
+			zipImg.Error = true
+		} else {
+			zipImg.Parsed = true
+			zipImg.PHash = phash
+			zipImg.Width = w
+			zipImg.Height = h
+		}
+		q.ds[cursor] = true
+		q.mux.Unlock()
+	}
+
+	fmt.Println("finished thread", cpu)
 }
 
 func saveText(file string, txt string) error {

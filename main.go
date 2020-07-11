@@ -12,15 +12,18 @@ import (
 )
 
 func main() {
-	modeServer := flag.String("server", "localhost", "interface ip to listen from. require --scanDir")
-	modeClient := flag.String("client", "localhost", "server ip to connect to")
+	modeServer := flag.String("server", "", "interface ip to listen from. require --scanDir")
+	modeClient := flag.String("client", "", "server ip to connect to")
 
 	dirPtr := flag.String("scanDir", ".", "dir to scan")
 
 	flag.Parse()
 
-	// local mode
+	fmt.Println("111", *modeServer, "222", *modeClient)
+
 	if *modeServer == "" && *modeClient == "" {
+		// local mode
+		fmt.Println("mode: local")
 
 		if dirPtr == nil || *dirPtr == "" {
 			fmt.Println("scanDir must be specified")
@@ -36,6 +39,8 @@ func main() {
 		core.ListDir(*dirPtr)
 
 	} else if *modeServer != "" {
+		// server mode
+		fmt.Println("mode: server")
 
 		if dirPtr == nil || *dirPtr == "" {
 			fmt.Println("scanDir must be specified")
@@ -48,6 +53,8 @@ func main() {
 		}
 
 	} else if *modeClient != "" {
+		// client mode
+		fmt.Println("mode: client")
 
 		err := client.Connect(*modeClient)
 		if err != nil {

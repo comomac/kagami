@@ -133,6 +133,12 @@ type Queue struct {
 // GetNext next ZipImage
 func (q *Queue) GetNext() *ZipImage {
 	q.mux.Lock()
+	if q.fin {
+		q.mux.Unlock()
+		return &ZipImage{
+			Inode: -1,
+		}
+	}
 	zi := q.zs[q.cur]
 	q.cur++
 	q.mux.Unlock()
@@ -245,7 +251,7 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 			q.zs[rtotal] = &ZipImage{
 				MTime:    info.ModTime(),
 				Name:     f.Name,
-				Inode:    ino,
+				Inode:    int64(ino),
 				Nth:      rtotal,
 				CRC32:    f.CRC32,
 				Data:     fdat,
@@ -312,6 +318,12 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 	q.fin = true
 	q.mux.Unlock()
 
+	if serverMode {
+		// kill and exit
+		log.Fatal("DONE")
+	}
+
+	fmt.Println("DONE")
 	return nil
 }
 
@@ -428,7 +440,7 @@ Loop:
 // ZipImage individual image file detail from zip file
 type ZipImage struct {
 	MTime    time.Time // zip file modified time
-	Inode    uint64    // zip file inode
+	Inode    int64     // zip file inode, -1 means stop for rpc
 	Nth      int       // image file order in zip
 	CRC32    uint32    // image data crc32
 	Name     string    // image file path+name

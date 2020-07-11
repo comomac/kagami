@@ -34,7 +34,7 @@ func (l *Listener) GetZipImage(n int, ack *core.ZipImage) error {
 
 // SetZipImage set the ZipImage data for RPC
 func (l *Listener) SetZipImage(zImg core.ZipImage, ack *int) error {
-	fmt.Printf("set! %d %X\n", zImg.Nth, zImg.PHash)
+	// fmt.Printf("set! %3d %016X %s\n", zImg.Nth, zImg.PHash, zImg.Name)
 	l.Queue.Set(zImg.Nth, &zImg)
 	*ack = 1
 	return nil

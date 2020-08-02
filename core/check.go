@@ -22,6 +22,7 @@ type Archive struct {
 	MTime  time.Time   // zip file modified time
 	Inode  int64       // zip file inode
 	Images []*ZipImage // metadata for images
+	Exact  bool        // exact match to head archive
 }
 
 // Archives list of image archives
@@ -152,100 +153,116 @@ func findDup(archives Archives) {
 	// detected dup groups
 	groups := DupArchives{}
 
-	for _, archive := range archives {
+	for _, head := range archives {
 		// fmt.Println("scan", archive.Name)
 		// skip invalid
-		if archive.Inode == 0 {
+		if head.Inode == 0 {
 			continue
 		}
 		// skip already found dup
-		if inodes[archive.Inode] {
+		if inodes[head.Inode] {
+			continue
+		}
+
+		// find by similar archive
+		dups := findSimilarMatch(head, archives)
+
+		// skip no duplicate found
+		if len(dups) == 0 {
 			continue
 		}
 
 		// holds the dup and the head
 		dup := &DupArchive{
-			Head: archive,
+			Head: head,
+			Dups: dups,
 		}
 
-		// loop all other archives to find
-		for _, archive2 := range archives {
-			// skip invalid
-			if archive2.Inode == 0 {
-				continue
-			}
-			// skip itself
-			if archive2.Inode == archive.Inode {
-				continue
-			}
-			// skip if image length too different
-			if math.Abs(float64(len(archive.Images)-len(archive2.Images))) > float64(maxArchiveLengthDiff) {
-				continue
-			}
-			// skip if no enough images to compare
-			if len(archive.Images) <= 5 {
-				continue
-			}
-			// skip if no enough images to compare (b)
-			if len(archive2.Images) <= 5 {
-				continue
-			}
-
-			// set image pHashes for comparison
-			imgHeads := []uint64{}
-			for i := 0; i < len(archive.Images); i++ {
-				if archive.Images[i].PHash == 0 {
-					// no blank page, all 0s
-					continue
-				}
-				if len(imgHeads) >= 5 {
-					// need only 5
-					break
-				}
-
-				imgHeads = append(imgHeads, archive.Images[i].PHash)
-			}
-
-			// score for keeping how many pHash match consecutive
-			score := 0
-			for i, image := range archive2.Images {
-				// dont go too far to save cpu cycle
-				if i > 10 {
-					break
-				}
-				// find dup
-				for _, imgHead := range imgHeads {
-					if calcDist(imgHead, image.PHash) <= maxDist {
-						score++
-					}
-				}
-			}
-
-			// at least find x dup image before classify as same
-			if score >= minScore {
-				dup.Dups = append(dup.Dups, archive2)
-
-				// a dup
-				inodes[archive2.Inode] = true
-			}
+		// set dup flag
+		for _, arc := range dups {
+			inodes[arc.Inode] = true
 		}
-
-		if len(dup.Dups) == 0 {
-			continue
-		}
+		// set itself to be dup
+		inodes[head.Inode] = true
 
 		groups = append(groups, dup)
-		fmt.Printf("%d: (%d) %s\n", len(groups), archive.Inode, archive.Name)
+		fmt.Printf("%d: (%d) %s\n", len(groups), head.Inode, head.Name)
 		for i, d := range dup.Dups {
 			fmt.Printf("  > %d (%d) %s\n", i, d.Inode, d.Name)
 		}
 		fmt.Printf("\n\n")
-
-		// add itself to be dup
-		inodes[archive.Inode] = true
 	}
 
 	fmt.Printf("found %d dup groups\n", len(groups))
+}
+
+func isExactMatch() {
+
+}
+
+func findSimilarMatch(head *Archive, archives Archives) []*Archive {
+	dups := []*Archive{}
+
+	// loop all other archives to find
+	for _, archive2 := range archives {
+		// skip invalid
+		if archive2.Inode == 0 {
+			continue
+		}
+		// skip itself
+		if archive2.Inode == head.Inode {
+			continue
+		}
+		// skip if image length too different
+		if math.Abs(float64(len(head.Images)-len(archive2.Images))) > float64(maxArchiveLengthDiff) {
+			continue
+		}
+		// skip if no enough images to compare
+		if len(head.Images) <= 5 {
+			continue
+		}
+		// skip if no enough images to compare (b)
+		if len(archive2.Images) <= 5 {
+			continue
+		}
+
+		// matching pHashes for similar match
+		imgHeads := []uint64{}
+		for i := 0; i < len(head.Images); i++ {
+			if head.Images[i].PHash == 0 {
+				// no blank page, all 0s
+				continue
+			}
+			if len(imgHeads) >= 5 {
+				// need only 5
+				break
+			}
+
+			imgHeads = append(imgHeads, head.Images[i].PHash)
+		}
+
+		// score for keeping how many pHash match consecutive
+		score := 0
+		for i, image := range archive2.Images {
+			// dont go too far to save cpu cycle
+			if i > 10 {
+				break
+			}
+			// find dup
+			for _, imgHead := range imgHeads {
+				if calcDist(imgHead, image.PHash) <= maxDist {
+					score++
+				}
+			}
+		}
+
+		// at least find x dup image before classify as dup archive
+		if score >= minScore {
+			dups = append(dups, archive2)
+		}
+	}
+
+	return dups
 }
 
 func rmDup() {

@@ -505,12 +505,14 @@ func startThreadByQueue(cpu int, q *Queue) {
 func saveText(file string, txt string) error {
 	f, err := os.Create(file)
 	if err != nil {
+		fmt.Println("err saveText Create", err)
 		return err
 	}
 	defer f.Close()
 
 	_, err = f.WriteString(txt)
 	if err != nil {
+		fmt.Println("err saveText WriteString", err)
 		return err
 	}
 

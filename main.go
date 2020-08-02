@@ -32,7 +32,7 @@ func main() {
 		}
 
 		// create store dir for inode data
-		err := os.Mkdir(*dirPtr, 0755)
+		err := os.Mkdir(*dirPtr+"/store", 0755)
 		if err != nil && !os.IsExist(err) {
 			log.Fatal(err)
 		}
@@ -52,7 +52,13 @@ func main() {
 			return
 		}
 
-		err := server.Serve(*hostIP, *dirPtr)
+		// create store dir for inode data
+		err := os.Mkdir(*dirPtr+"/store", 0755)
+		if err != nil && !os.IsExist(err) {
+			log.Fatal(err)
+		}
+
+		err = server.Serve(*hostIP, *dirPtr)
 		if err != nil {
 			log.Fatal(err)
 		}

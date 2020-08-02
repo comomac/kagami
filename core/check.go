@@ -37,6 +37,9 @@ type DupArchive struct {
 // DupArchives list of duplicate archives
 type DupArchives []*DupArchive
 
+// DupInodeMap maps the inode with duplicate flag
+type DupInodeMap map[int64]bool
+
 // adjustable
 var (
 	// maximum acceptable image distance
@@ -148,7 +151,7 @@ func calcDist(a, b uint64) int {
 
 func findDup(archives Archives) {
 	// file inodes that been found to be dup
-	inodes := map[int64]bool{}
+	dupInodeMap := DupInodeMap{}
 
 	// detected dup groups
 	groups := DupArchives{}
@@ -160,12 +163,17 @@ func findDup(archives Archives) {
 			continue
 		}
 		// skip already found dup
-		if inodes[head.Inode] {
+		if dupInodeMap[head.Inode] {
 			continue
 		}
 
-		// find by similar archive
-		dups := findSimilarMatch(head, archives)
+		dups := []*Archive{}
+
+		// find by exact image match archive
+		// dups = findExactMatch(head, archives, dupInodeMap)
+
+		// find by similar image match archive
+		dups = findSimilarMatch(head, archives, dupInodeMap)
 
 		// skip no duplicate found
 		if len(dups) == 0 {
@@ -178,13 +186,6 @@ func findDup(archives Archives) {
 			Dups: dups,
 		}
 
-		// set dup flag
-		for _, arc := range dups {
-			inodes[arc.Inode] = true
-		}
-		// set itself to be dup
-		inodes[head.Inode] = true
-
 		groups = append(groups, dup)
 		fmt.Printf("%d: (%d) %s\n", len(groups), head.Inode, head.Name)
 		for i, d := range dup.Dups {
@@ -196,11 +197,72 @@ func findDup(archives Archives) {
 	fmt.Printf("found %d dup groups\n", len(groups))
 }
 
-func isExactMatch() {
+func findExactMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap) []*Archive {
+	dups := []*Archive{}
 
+	headImageCRCs := []uint32{}
+	for _, image := range head.Images {
+		headImageCRCs = append(headImageCRCs, image.CRC32)
+	}
+
+	// loop all other archives to find
+	for _, archive2 := range archives {
+		// skip invalid
+		if archive2.Inode == 0 {
+			continue
+		}
+		// skip itself
+		if archive2.Inode == head.Inode {
+			continue
+		}
+		// skip if already mark as dup
+		if dupInodeMap[archive2.Inode] {
+			continue
+		}
+		// skip if image length too different
+		if math.Abs(float64(len(head.Images)-len(archive2.Images))) > float64(maxArchiveLengthDiff) {
+			continue
+		}
+
+		diff := 0
+		for _, image := range archive2.Images {
+			if diff > maxArchiveLengthDiff {
+				break
+			}
+
+			// remove first matching crc
+			headImageCRCs = remove(headImageCRCs, image.CRC32)
+			diff++
+		}
+		// make sure not too many diff
+		if len(headImageCRCs) > maxArchiveLengthDiff {
+			continue
+		}
+		dups = append(dups, archive2)
+
+		// set dup flag
+		dupInodeMap[archive2.Inode] = true
+		dupInodeMap[head.Inode] = true
+	}
+
+	return dups
 }
 
-func findSimilarMatch(head *Archive, archives Archives) []*Archive {
+func remove(in []uint32, del uint32) []uint32 {
+	arr := []uint32{}
+	flag := false
+	for _, x := range in {
+		if !flag && x == del {
+			// skip the first match
+			flag = true
+			continue
+		}
+		arr = append(arr, x)
+	}
+	return arr
+}
+
+func findSimilarMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap) []*Archive {
 	dups := []*Archive{}
 
 	// loop all other archives to find
@@ -211,6 +273,10 @@ func findSimilarMatch(head *Archive, archives Archives) []*Archive {
 		}
 		// skip itself
 		if archive2.Inode == head.Inode {
+			continue
+		}
+		// skip if already mark as dup
+		if dupInodeMap[archive2.Inode] {
 			continue
 		}
 		// skip if image length too different
@@ -260,6 +326,9 @@ func findSimilarMatch(head *Archive, archives Archives) []*Archive {
 		if score >= minScore {
 			dups = append(dups, archive2)
 		}
+		// set dup flag
+		dupInodeMap[archive2.Inode] = true
+		dupInodeMap[head.Inode] = true
 	}
 
 	return dups

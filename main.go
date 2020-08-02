@@ -17,6 +17,7 @@ func main() {
 	dirPtr := flag.String("scanDir", ".", "dir to scan")
 	maxIDist := flag.Int("maxIDist", 3, "maximum image distance. 0-64")
 	maxADiff := flag.Int("maxADiff", 10, "maximum archive difference")
+	exactMatch := flag.Bool("exactMatch", false, "match using exact match")
 
 	flag.Parse()
 
@@ -81,9 +82,9 @@ func main() {
 			fmt.Println("invalid maxADiff. valid >0")
 			return
 		}
-		fmt.Printf("maxIDist: %d  maxADiff: %d\n", *maxIDist, *maxADiff)
+		fmt.Printf("maxIDist: %d  maxADiff: %d  exactMatch: %t\n", *maxIDist, *maxADiff, *exactMatch)
 
-		core.FindDup(*dirPtr+"/store", *maxIDist, *maxADiff)
+		core.FindDup(*dirPtr+"/store", *maxIDist, *maxADiff, *exactMatch)
 
 	case "help":
 	default:

@@ -42,6 +42,8 @@ type DupInodeMap map[int64]bool
 
 // adjustable
 var (
+	// match image by exact match
+	exactMatch = false
 	// maximum acceptable image distance
 	maxImageDist = 3
 	// minimum score to accept as archive match
@@ -169,11 +171,13 @@ func findDup(archives Archives) {
 
 		dups := []*Archive{}
 
-		// find by exact image match archive
-		// dups = findExactMatch(head, archives, dupInodeMap)
-
-		// find by similar image match archive
-		dups = findSimilarMatch(head, archives, dupInodeMap)
+		if exactMatch {
+			// find by exact image match archive
+			dups = findExactMatch(head, archives, dupInodeMap)
+		} else {
+			// find by similar image match archive
+			dups = findSimilarMatch(head, archives, dupInodeMap)
+		}
 
 		// skip no duplicate found
 		if len(dups) == 0 {
@@ -344,7 +348,7 @@ func hostUI() {
 }
 
 // FindDup exec find duplicate archive
-func FindDup(dir string, maxIDiff, maxADiff int) error {
+func FindDup(dir string, maxIDiff, maxADiff int, exMatch bool) error {
 	archives, err := loadSums(dir)
 	if err != nil {
 		return err
@@ -352,6 +356,7 @@ func FindDup(dir string, maxIDiff, maxADiff int) error {
 
 	maxImageDist = maxIDiff
 	maxArchiveLengthDiff = maxADiff
+	exactMatch = exMatch
 
 	fmt.Printf("found %d txt\n", len(archives))
 

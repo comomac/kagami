@@ -43,7 +43,7 @@ type DupInodeMap map[int64]bool
 // adjustable
 var (
 	// maximum acceptable image distance
-	maxDist = 10
+	maxImageDist = 3
 	// minimum score to accept as archive match
 	minScore = 4
 	// maximum acceptable images length between archive
@@ -279,10 +279,6 @@ func findSimilarMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap)
 		if dupInodeMap[archive2.Inode] {
 			continue
 		}
-		// skip if image length too different
-		if math.Abs(float64(len(head.Images)-len(archive2.Images))) > float64(maxArchiveLengthDiff) {
-			continue
-		}
 		// skip if no enough images to compare
 		if len(head.Images) <= 5 {
 			continue
@@ -291,16 +287,20 @@ func findSimilarMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap)
 		if len(archive2.Images) <= 5 {
 			continue
 		}
+		// skip if image length too different
+		if math.Abs(float64(len(head.Images)-len(archive2.Images))) > float64(maxArchiveLengthDiff) {
+			continue
+		}
 
 		// matching pHashes for similar match
 		imgHeads := []uint64{}
 		for i := 0; i < len(head.Images); i++ {
+			// no blank page, all 0s
 			if head.Images[i].PHash == 0 {
-				// no blank page, all 0s
 				continue
 			}
+			// need only 5
 			if len(imgHeads) >= 5 {
-				// need only 5
 				break
 			}
 
@@ -316,7 +316,7 @@ func findSimilarMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap)
 			}
 			// find dup
 			for _, imgHead := range imgHeads {
-				if calcDist(imgHead, image.PHash) <= maxDist {
+				if calcDist(imgHead, image.PHash) <= maxImageDist {
 					score++
 				}
 			}
@@ -325,10 +325,11 @@ func findSimilarMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap)
 		// at least find x dup image before classify as dup archive
 		if score >= minScore {
 			dups = append(dups, archive2)
+
+			// set dup flag
+			dupInodeMap[archive2.Inode] = true
+			dupInodeMap[head.Inode] = true
 		}
-		// set dup flag
-		dupInodeMap[archive2.Inode] = true
-		dupInodeMap[head.Inode] = true
 	}
 
 	return dups
@@ -343,14 +344,14 @@ func hostUI() {
 }
 
 // FindDup exec find duplicate archive
-func FindDup(dir string, id, ad int) error {
+func FindDup(dir string, maxIDiff, maxADiff int) error {
 	archives, err := loadSums(dir)
 	if err != nil {
 		return err
 	}
 
-	maxDist = id
-	maxArchiveLengthDiff = ad
+	maxImageDist = maxIDiff
+	maxArchiveLengthDiff = maxADiff
 
 	fmt.Printf("found %d txt\n", len(archives))
 

@@ -15,7 +15,7 @@ func main() {
 	mode := flag.String("mode", "help", "mode to run. server, client, local, check")
 	hostIP := flag.String("hostIP", "", "server ip to host from or connect ip (server/client)")
 	dirPtr := flag.String("scanDir", ".", "dir to scan")
-	maxIDist := flag.Int("maxIDist", 10, "maximum image distance. 0-64")
+	maxIDist := flag.Int("maxIDist", 3, "maximum image distance. 0-64")
 	maxADiff := flag.Int("maxADiff", 10, "maximum archive difference")
 
 	flag.Parse()
@@ -81,6 +81,7 @@ func main() {
 			fmt.Println("invalid maxADiff. valid >0")
 			return
 		}
+		fmt.Printf("maxIDist: %d  maxADiff: %d\n", *maxIDist, *maxADiff)
 
 		core.FindDup(*dirPtr+"/store", *maxIDist, *maxADiff)
 

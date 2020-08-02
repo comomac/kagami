@@ -12,10 +12,11 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "help", "mode to run. server, client, local, check, rmdup")
+	mode := flag.String("mode", "help", "mode to run. server, client, local, check")
 	hostIP := flag.String("hostIP", "", "server ip to host from or connect ip (server/client)")
-
 	dirPtr := flag.String("scanDir", ".", "dir to scan")
+	maxIDist := flag.Int("maxIDist", 10, "maximum image distance. 0-64")
+	maxADiff := flag.Int("maxADiff", 10, "maximum archive difference")
 
 	flag.Parse()
 
@@ -24,13 +25,13 @@ func main() {
 		// local mode
 		fmt.Println("mode: local")
 
-		if dirPtr == nil || *dirPtr == "" {
+		if *dirPtr == "" {
 			fmt.Println("scanDir must be specified")
 			return
 		}
 
 		// create store dir for inode data
-		err := os.Mkdir("store", 0755)
+		err := os.Mkdir(*dirPtr, 0755)
 		if err != nil && !os.IsExist(err) {
 			log.Fatal(err)
 		}
@@ -45,7 +46,7 @@ func main() {
 		// server mode
 		fmt.Println("mode: server")
 
-		if dirPtr == nil || *dirPtr == "" {
+		if *dirPtr == "" {
 			fmt.Println("scanDir must be specified")
 			return
 		}
@@ -62,6 +63,26 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+
+	case "check":
+		// check and find duplicate
+
+		if *dirPtr == "" {
+			fmt.Println("scanDir must be specified")
+			return
+		}
+
+		if *maxIDist > 64 || *maxIDist < 0 {
+			fmt.Println("invalid maxIDist. valid 0-64")
+			return
+		}
+
+		if *maxADiff < 0 {
+			fmt.Println("invalid maxADiff. valid >0")
+			return
+		}
+
+		core.FindDup(*dirPtr+"/store", *maxIDist, *maxADiff)
 
 	case "help":
 	default:

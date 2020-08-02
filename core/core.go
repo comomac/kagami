@@ -196,6 +196,9 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 		if info.IsDir() {
 			return nil
 		}
+		if strings.HasPrefix(info.Name(), ".") {
+			return nil
+		}
 		if !reFileExtCBZ.MatchString(info.Name()) {
 			return nil
 		}

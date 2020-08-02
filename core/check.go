@@ -201,86 +201,69 @@ func findDup(archives Archives) {
 	fmt.Printf("found %d dup groups\n", len(groups))
 }
 
+// todo fix bug for this function, every now and then it just grab too many not dup
 func findExactMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap) []*Archive {
 	dups := []*Archive{}
 
-	headImageCRCs := []uint32{}
-	for _, image := range head.Images {
-		headImageCRCs = append(headImageCRCs, image.CRC32)
-	}
-
 	// loop all other archives to find
-	for _, archive2 := range archives {
+	for _, archive := range archives {
 		// skip invalid
-		if archive2.Inode == 0 {
+		if archive.Inode == 0 {
 			continue
 		}
 		// skip itself
-		if archive2.Inode == head.Inode {
+		if archive.Inode == head.Inode {
 			continue
 		}
 		// skip if already mark as dup
-		if dupInodeMap[archive2.Inode] {
+		if dupInodeMap[archive.Inode] {
 			continue
 		}
 		// skip if image length too different
-		if math.Abs(float64(len(head.Images)-len(archive2.Images))) > float64(maxArchiveLengthDiff) {
+		if math.Abs(float64(len(head.Images)-len(archive.Images))) > float64(maxArchiveLengthDiff) {
 			continue
 		}
 
-		diff := 0
-		for _, image := range archive2.Images {
-			if diff > maxArchiveLengthDiff {
-				break
+		found := 0
+		for _, headImage := range head.Images {
+			for _, image := range archive.Images {
+				if image.CRC32 == headImage.CRC32 &&
+					image.DataSize == headImage.DataSize &&
+					image.Height == headImage.Height &&
+					image.Width == headImage.Width {
+					found++
+				}
 			}
-
-			// remove first matching crc
-			headImageCRCs = remove(headImageCRCs, image.CRC32)
-			diff++
 		}
-		// make sure not too many diff
-		if len(headImageCRCs) > maxArchiveLengthDiff {
+		if len(head.Images)-found > maxArchiveLengthDiff {
 			continue
 		}
-		dups = append(dups, archive2)
+
+		dups = append(dups, archive)
 
 		// set dup flag
-		dupInodeMap[archive2.Inode] = true
+		dupInodeMap[archive.Inode] = true
 		dupInodeMap[head.Inode] = true
 	}
 
 	return dups
 }
 
-func remove(in []uint32, del uint32) []uint32 {
-	arr := []uint32{}
-	flag := false
-	for _, x := range in {
-		if !flag && x == del {
-			// skip the first match
-			flag = true
-			continue
-		}
-		arr = append(arr, x)
-	}
-	return arr
-}
-
 func findSimilarMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap) []*Archive {
 	dups := []*Archive{}
 
 	// loop all other archives to find
-	for _, archive2 := range archives {
+	for _, archive := range archives {
 		// skip invalid
-		if archive2.Inode == 0 {
+		if archive.Inode == 0 {
 			continue
 		}
 		// skip itself
-		if archive2.Inode == head.Inode {
+		if archive.Inode == head.Inode {
 			continue
 		}
 		// skip if already mark as dup
-		if dupInodeMap[archive2.Inode] {
+		if dupInodeMap[archive.Inode] {
 			continue
 		}
 		// skip if no enough images to compare
@@ -288,11 +271,11 @@ func findSimilarMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap)
 			continue
 		}
 		// skip if no enough images to compare (b)
-		if len(archive2.Images) <= 5 {
+		if len(archive.Images) <= 5 {
 			continue
 		}
 		// skip if image length too different
-		if math.Abs(float64(len(head.Images)-len(archive2.Images))) > float64(maxArchiveLengthDiff) {
+		if math.Abs(float64(len(head.Images)-len(archive.Images))) > float64(maxArchiveLengthDiff) {
 			continue
 		}
 
@@ -313,7 +296,7 @@ func findSimilarMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap)
 
 		// score for keeping how many pHash match consecutive
 		score := 0
-		for i, image := range archive2.Images {
+		for i, image := range archive.Images {
 			// dont go too far to save cpu cycle
 			if i > 10 {
 				break
@@ -328,10 +311,10 @@ func findSimilarMatch(head *Archive, archives Archives, dupInodeMap DupInodeMap)
 
 		// at least find x dup image before classify as dup archive
 		if score >= minScore {
-			dups = append(dups, archive2)
+			dups = append(dups, archive)
 
 			// set dup flag
-			dupInodeMap[archive2.Inode] = true
+			dupInodeMap[archive.Inode] = true
 			dupInodeMap[head.Inode] = true
 		}
 	}

@@ -473,7 +473,9 @@ func startThreadByQueue(cpu int, q *Queue) {
 			continue
 		}
 
+		q.mux.Lock()
 		zipImg := q.zs[q.cur]
+		q.mux.Unlock()
 		if zipImg == nil {
 			// not ready yet
 			time.Sleep(sleepTime)

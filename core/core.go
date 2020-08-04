@@ -308,7 +308,10 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 			fmt.Println(line)
 			txt += line + "\n"
 		}
-		saveText(inoFile, txt)
+		err = saveText(inoFile, txt)
+		if err != nil {
+			log.Fatal(err)
+		}
 		q.mux.Unlock()
 
 		return nil
@@ -433,7 +436,10 @@ Loop:
 				continue
 			}
 			inoFile := fmt.Sprintf("store/%d.txt", ino)
-			saveText(inoFile, txt)
+			err = saveText(inoFile, txt)
+			if err != nil {
+				log.Fatal(err)
+			}
 
 		}
 	}
@@ -507,14 +513,12 @@ func startThreadByQueue(cpu int, q *Queue) {
 func saveText(file string, txt string) error {
 	f, err := os.Create(file)
 	if err != nil {
-		fmt.Println("err saveText Create", err)
 		return err
 	}
 	defer f.Close()
 
 	_, err = f.WriteString(txt)
 	if err != nil {
-		fmt.Println("err saveText WriteString", err)
 		return err
 	}
 

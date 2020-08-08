@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ninja-software/terror"
 )
 
 // check and look for archives with duplicate images
@@ -57,7 +58,7 @@ func loadSums(dir string) (Archives, error) {
 
 	err := filepath.Walk(dir, func(file string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return terror.New(err, "")
 		}
 		if info.IsDir() {
 			return nil
@@ -75,7 +76,7 @@ func loadSums(dir string) (Archives, error) {
 			return nil
 		}
 		if archive.Inode == 0 {
-			return fmt.Errorf("ino is 0")
+			return terror.New(fmt.Errorf("ino is 0"), "")
 		}
 
 		archives = append(archives, archive)
@@ -83,7 +84,7 @@ func loadSums(dir string) (Archives, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, terror.New(err, "")
 	}
 
 	return archives, nil
@@ -92,7 +93,7 @@ func loadSums(dir string) (Archives, error) {
 func loadSum(file string) (*Archive, error) {
 	b, err := ioutil.ReadFile(file)
 	if err != nil {
-		return nil, err
+		return nil, terror.New(err, "")
 	}
 
 	lines := strings.Split(string(b), "\n")
@@ -100,7 +101,7 @@ func loadSum(file string) (*Archive, error) {
 	sIno := strings.ReplaceAll(filepath.Base(file), ".txt", "")
 	ino, err := strconv.Atoi(sIno)
 	if err != nil {
-		return nil, err
+		return nil, terror.New(err, "")
 	}
 
 	archive := &Archive{
@@ -118,19 +119,19 @@ func loadSum(file string) (*Archive, error) {
 			continue
 		}
 
-		// make sure line has at least 47 chars
-		if len(line) < 47 {
+		// make sure line has at least 80 chars
+		if len(line) < 80 {
 			continue
 		}
 
-		left := line[0:44]
-		right := line[46:]
+		left := line[0:77]
+		right := line[80:]
 
 		zz := ZipImage{
 			Name: right,
 			Nth:  imageNth,
 		}
-		_, err := fmt.Sscanf(left, "%8X %d %d %d %16X", &zz.CRC32, &zz.DataSize, &zz.Width, &zz.Height, &zz.PHash)
+		_, err := fmt.Sscanf(left, "%8X %16X %d %d %d %16X", &zz.CRC32, &zz.MD5, &zz.DataSize, &zz.Width, &zz.Height, &zz.PHash)
 		if err != nil {
 			fmt.Println("err", err, file)
 			spew.Dump(left)
@@ -334,7 +335,7 @@ func hostUI() {
 func FindDup(dir string, maxIDiff, maxADiff int, exMatch bool) error {
 	archives, err := loadSums(dir)
 	if err != nil {
-		return err
+		return terror.New(err, "")
 	}
 
 	maxImageDist = maxIDiff

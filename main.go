@@ -9,6 +9,7 @@ import (
 	"github.com/comomac/kagami/client"
 	"github.com/comomac/kagami/core"
 	"github.com/comomac/kagami/server"
+	"github.com/ninja-software/terror"
 )
 
 func main() {
@@ -34,7 +35,8 @@ func main() {
 		// create store dir for inode data
 		err := os.Mkdir(*dirPtr+"/store", 0755)
 		if err != nil && !os.IsExist(err) {
-			log.Fatal(err)
+			terror.Echo(err)
+			return
 		}
 
 		// list by files
@@ -42,7 +44,15 @@ func main() {
 
 		// list by images
 		q := core.Queue{}
-		core.ListDirByQueue(*dirPtr, &q, false)
+		err = core.ListDirByQueue(*dirPtr, &q, false)
+		if err != nil {
+			terror.Echo(err)
+			return
+		}
+
+		fmt.Println("DONE")
+		return
+
 	case "server":
 		// server mode
 		fmt.Println("mode: server")
@@ -62,6 +72,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+
 	case "client":
 		// client mode
 		fmt.Println("mode: client")
@@ -90,7 +101,10 @@ func main() {
 		}
 		fmt.Printf("maxIDist: %d  maxADiff: %d  exactMatch: %t\n", *maxIDist, *maxADiff, *exactMatch)
 
-		core.FindDup(*dirPtr+"/store", *maxIDist, *maxADiff, *exactMatch)
+		err := core.FindDup(*dirPtr+"/store", *maxIDist, *maxADiff, *exactMatch)
+		if err != nil {
+			log.Fatal(err)
+		}
 
 	case "help":
 	default:

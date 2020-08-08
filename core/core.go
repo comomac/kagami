@@ -3,10 +3,12 @@ package core
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/md5"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -19,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ninja-software/terror"
 	"golang.org/x/image/draw"
 )
 
@@ -75,7 +78,7 @@ func ListDir(dir string) error {
 
 	err := filepath.Walk(dir, func(file string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return terror.New(err, "")
 		}
 		if info.IsDir() {
 			return nil
@@ -87,7 +90,7 @@ func ListDir(dir string) error {
 		// zip file inode
 		ino, err := fileInode(file)
 		if err != nil {
-			return err
+			return terror.New(err, "")
 		}
 		// inode info file
 		inoFile := fmt.Sprintf("store/%d.txt", ino)
@@ -105,7 +108,7 @@ func ListDir(dir string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return terror.New(err, "")
 	}
 
 	// fill with exits
@@ -191,7 +194,7 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 
 	err := filepath.Walk(dir, func(file string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return terror.New(err, "")
 		}
 		if info.IsDir() {
 			return nil
@@ -206,7 +209,7 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 		// zip file inode
 		ino, err := fileInode(file)
 		if err != nil {
-			return err
+			return terror.New(err, "")
 		}
 		// inode info file
 		inoFile := fmt.Sprintf("store/%d.txt", ino)
@@ -222,7 +225,7 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 		// -- producer --
 		r, err := zip.OpenReader(file)
 		if err != nil {
-			return err
+			return terror.New(err, "")
 		}
 		defer r.Close()
 
@@ -242,11 +245,11 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 
 			fp, err := f.Open()
 			if err != nil {
-				return err
+				return terror.New(err, "")
 			}
 			fdat, err := ioutil.ReadAll(fp)
 			if err != nil {
-				return err
+				return terror.New(err, "")
 			}
 
 			// add queue
@@ -257,6 +260,7 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 				Inode:    int64(ino),
 				Nth:      rtotal,
 				CRC32:    f.CRC32,
+				MD5:      md5.Sum(fdat),
 				Data:     fdat,
 				DataSize: f.UncompressedSize64,
 			}
@@ -304,20 +308,25 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 		// save phash record
 		txt := "# kagami_imgsum_ver: 1\n" + "# file: " + file + "\n"
 		for _, zz := range zs {
-			line := fmt.Sprintf("%08X %9d %04d %04d %016X %s", zz.CRC32, zz.DataSize, zz.Width, zz.Height, zz.PHash, zz.Name)
+			line := fmt.Sprintf("%08X %016X %9d %04d %04d %016X %s", zz.CRC32, zz.MD5, zz.DataSize, zz.Width, zz.Height, zz.PHash, zz.Name)
 			fmt.Println(line)
 			txt += line + "\n"
 		}
-		err = saveText(inoFile, txt)
+		err = saveText(dir+"/"+inoFile, txt)
 		if err != nil {
-			log.Fatal(err)
+			if serverMode {
+				// kill and exit
+				log.Fatal("DONE")
+			} else {
+				return terror.New(err, "")
+			}
 		}
 		q.mux.Unlock()
 
 		return nil
 	})
 	if err != nil {
-		return err
+		return terror.New(err, "")
 	}
 
 	q.mux.Lock()
@@ -336,13 +345,13 @@ func ListDirByQueue(dir string, q *Queue, serverMode bool) error {
 func listZip(file string) (string, error) {
 	ino, err := fileInode(file)
 	if err != nil {
-		return "", err
+		return "", terror.New(err, "")
 	}
 	fmt.Printf("listing zip (%d) %s\n", ino, file)
 
 	r, err := zip.OpenReader(file)
 	if err != nil {
-		return "", err
+		return "", terror.New(err, "")
 	}
 	defer r.Close()
 
@@ -352,12 +361,12 @@ func listZip(file string) (string, error) {
 			continue
 		}
 
-		hsh, w, h, err := unzipImageInfo(f)
+		hsh, w, h, hMD5, err := unzipImageInfo(f)
 		if err != nil {
-			return "", err
+			return "", terror.New(err, "")
 		}
 
-		line := fmt.Sprintf("%08X %9d %04d %04d %016X %s", f.CRC32, f.UncompressedSize64, w, h, hsh, f.Name)
+		line := fmt.Sprintf("%08X %016X %9d %04d %04d %016X %s", f.CRC32, hMD5, f.UncompressedSize64, w, h, hsh, f.Name)
 		fmt.Println(line)
 		lines = append(lines, line)
 	}
@@ -367,31 +376,36 @@ func listZip(file string) (string, error) {
 
 // unzipImageInfo create phash from zip.File.
 // phash, w, h
-func unzipImageInfo(f *zip.File) (uint64, int, int, error) {
+func unzipImageInfo(f *zip.File) (uint64, int, int, [16]byte, error) {
+	var hshMD5 [16]byte
+
 	if !reFileExtJPG.MatchString(f.Name) && !reFileExtPNG.MatchString(f.Name) {
-		return 0, 0, 0, fmt.Errorf("not supported image extension")
+		return 0, 0, 0, hshMD5, fmt.Errorf("not supported image extension")
 	}
 
 	rc, err := f.Open()
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, hshMD5, terror.New(err, "")
 	}
-	img, _, err := image.Decode(rc)
+	var buf bytes.Buffer
+	tee := io.TeeReader(rc, &buf)
+	img, _, err := image.Decode(tee)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, hshMD5, terror.New(err, "")
 	}
+	hshMD5 = md5.Sum(buf.Bytes())
 	img2, err := imageResize(img, draw.BiLinear)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, hshMD5, terror.New(err, "")
 	}
 	hsh, err := imagePHash(img2)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, hshMD5, terror.New(err, "")
 	}
 
 	rect := img.Bounds().Max
 
-	return hsh, rect.X, rect.Y, nil
+	return hsh, rect.X, rect.Y, hshMD5, nil
 }
 
 // ProcessImage produce image phash, width, height
@@ -400,15 +414,15 @@ func ProcessImage(dat []byte) (uint64, int, int, error) {
 
 	img, _, err := image.Decode(r)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, terror.New(err, "")
 	}
 	img2, err := imageResize(img, draw.BiLinear)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, terror.New(err, "")
 	}
 	hsh, err := imagePHash(img2)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, terror.New(err, "")
 	}
 
 	rect := img.Bounds().Max
@@ -452,6 +466,7 @@ type ZipImage struct {
 	Inode    int64     // zip file inode, -1 means stop for rpc
 	Nth      int       // image file order in zip
 	CRC32    uint32    // image data crc32
+	MD5      [16]byte  // image data md5
 	Name     string    // image file path+name
 	Data     []byte    // image data
 	DataSize uint64    // image data size
@@ -513,13 +528,13 @@ func startThreadByQueue(cpu int, q *Queue) {
 func saveText(file string, txt string) error {
 	f, err := os.Create(file)
 	if err != nil {
-		return err
+		return terror.New(err, "")
 	}
 	defer f.Close()
 
 	_, err = f.WriteString(txt)
 	if err != nil {
-		return err
+		return terror.New(err, "")
 	}
 
 	return nil
@@ -565,13 +580,13 @@ func imageOpen() (image.Image, error) {
 
 	f, err := os.Open(file)
 	if err != nil {
-		return nil, err
+		return nil, terror.New(err, "")
 	}
 	defer f.Close()
 
 	img, format, err := image.Decode(f)
 	if err != nil {
-		return nil, err
+		return nil, terror.New(err, "")
 	}
 	fmt.Println("img format is", format)
 
@@ -581,11 +596,11 @@ func imageOpen() (image.Image, error) {
 func imageSave(out string, img image.Image) error {
 	dst, err := os.Create(out)
 	if err != nil {
-		return err
+		return terror.New(err, "")
 	}
 	err = png.Encode(dst, img)
 	if err != nil {
-		return err
+		return terror.New(err, "")
 	}
 	return nil
 }
@@ -601,14 +616,14 @@ func basicResizeBench(img image.Image) error {
 		tp := time.Now()
 		img2, err := imageResize(img, resizeMethod)
 		if err != nil {
-			return err
+			return terror.New(err, "")
 		}
 		log.Printf("scaling using %d takes %v time",
 			i, time.Now().Sub(tp))
 
 		err = imageSave(fmt.Sprintf("out-%d.png", i), img2)
 		if err != nil {
-			return err
+			return terror.New(err, "")
 		}
 	}
 	return nil
@@ -617,12 +632,12 @@ func basicResizeBench(img image.Image) error {
 func imagePHashFile(file string) (uint64, error) {
 	f, err := os.Open(file)
 	if err != nil {
-		return 0, err
+		return 0, terror.New(err, "")
 	}
 
 	img, format, err := image.Decode(f)
 	if err != nil {
-		return 0, err
+		return 0, terror.New(err, "")
 	}
 	if format != "png" {
 		return 0, fmt.Errorf("image not png")
